@@ -170,11 +170,14 @@ glm-quota-monitor/
 
 ## 🔌 数据来源说明
 
-本工具调用的额度查询接口（`/api/monitor/usage/*`）来自智谱官方插件 **glm-plan-usage** 的源码：
+本工具通过调用智谱的额度查询接口（`/api/monitor/usage/*`）获取数据。该接口路径参考自智谱官方开源插件 **glm-plan-usage**（[zai-org/zai-coding-plugins](https://github.com/zai-org/zai-coding-plugins)，Apache-2.0 协议）。
 
-> https://github.com/zai-org/zai-coding-plugins
+需要说明：
+- 本项目**未复制官方插件的任何代码**，所有代码均为独立编写（Python 实现，官方为 JavaScript）
+- 仅参考了"存在这样一个 HTTP 接口"这一客观事实，并自行实现了请求与解析逻辑
+- 该接口**未写入智谱公开 API 文档**，属于内部接口，未来可能变更。若失效请对照上述官方仓库的最新实现
 
-这些是智谱内部使用的接口，**未写入公开 API 文档**。本工具本质上是把官方插件的能力做成了独立的桌面小工具。理论上稳定，但若接口未来变更可能导致失效——届时请对照上述官方仓库的最新实现。
+> 💡 这类似编写一个第三方客户端调用某平台的 API——用户使用自己的 API Key 查询自己的额度数据，不涉及绕过、冒充或批量爬取。
 
 ---
 
