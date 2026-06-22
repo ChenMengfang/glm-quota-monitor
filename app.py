@@ -169,7 +169,9 @@ class FloatingBar(tk.Toplevel):
         left.pack(side=LEFT, padx=12, pady=8)
         tk.Label(left, text="◷  RESET IN", bg=BG_BAR_TRACK, fg=FG_DIM,
                  font=("Consolas", 8)).pack(anchor="w")
-        tk.Label(left, text="5H 窗口重置倒计时", bg=BG_BAR_TRACK, fg=FG,
+        # 副标题（窗口未激活时会改成提示文字）
+        self.reset_sub_var = tk.StringVar(value="5H 窗口重置倒计时")
+        tk.Label(left, textvariable=self.reset_sub_var, bg=BG_BAR_TRACK, fg=FG,
                  font=("Segoe UI", 8), anchor="w").pack(anchor="w")
         # 右侧倒计时
         self.reset_cd_var = tk.StringVar(value="-- : -- : --")
@@ -378,6 +380,17 @@ class FloatingBar(tk.Toplevel):
             return
         delta = datetime.fromtimestamp(ts / 1000) - datetime.now()
         secs = max(0, int(delta.total_seconds()))
+        # 5h 窗口理论上限就是 5 小时；超过 6h 说明窗口还没被激活
+        # （新账号/新 key 未产生过调用时，接口返回的是占位重置点）
+        # 此时显示友好提示，而不是一个荒谬的大数字
+        sub = getattr(self, "reset_sub_var", None)
+        if secs > 6 * 3600:
+            self.reset_cd_var.set("NOT ACTIVE")
+            if sub:
+                sub.set("窗口未激活 · 调用一次模型后开始计时")
+            return
+        if sub:
+            sub.set("5H 窗口重置倒计时")
         h, rem = divmod(secs, 3600)
         m, s = divmod(rem, 60)
         self.reset_cd_var.set(f"{h:02d} : {m:02d} : {s:02d}")
