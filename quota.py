@@ -15,11 +15,30 @@ from datetime import datetime, timedelta
 
 
 @dataclass
+class TokenLimit:
+    """一个 token 限制窗口（接口里可能有多个，如 5h 和 周）。"""
+    pct: float = 0.0
+    reset_ts: int | None = None
+    unit: int = 0          # 接口的 unit 编码：3=小时，6=周，等等
+    number: int = 0        # 接口的 number：5 表示"5 小时"
+
+    @property
+    def label(self) -> str:
+        """人类可读的窗口名，如 '5H' / 'WEEK'。"""
+        if self.unit == 3 and self.number == 5:
+            return "5H"
+        if self.unit == 6:   # 周窗口
+            return "WEEK"
+        if self.unit == 3:
+            return f"{self.number}H"
+        return f"U{self.unit}N{self.number}"
+
+
+@dataclass
 class QuotaData:
     """一次查询的统一结果。"""
-    level: str = ""                  # 套餐等级，如 "lite" / "pro"
-    token_pct: float = 0.0           # 5h token 窗口使用百分比
-    token_reset_ts: int | None = None
+    level: str = ""                  # 套餐等级，如 "lite" / "pro" / "max"
+    token_limits: list[TokenLimit] = field(default_factory=list)  # 所有 token 窗口
     mcp_pct: float = 0.0             # MCP 月用量百分比
     mcp_current: int = 0
     mcp_total: int = 0
@@ -33,6 +52,22 @@ class QuotaData:
     def is_empty(self) -> bool:
         """从未加载过真实数据（刚启动的初始状态）。"""
         return not self.loaded and not self.error
+
+    @property
+    def token_5h(self) -> TokenLimit | None:
+        """5 小时 token 窗口（取 unit=3 的）。"""
+        for tl in self.token_limits:
+            if tl.unit == 3:
+                return tl
+        return self.token_limits[0] if self.token_limits else None
+
+    @property
+    def token_weekly(self) -> TokenLimit | None:
+        """周 token 窗口（取 unit=6 的）。"""
+        for tl in self.token_limits:
+            if tl.unit == 6:
+                return tl
+        return None
 
 
 def _http_get(url: str, auth_token: str, timeout: float = 15.0) -> dict:
@@ -75,8 +110,13 @@ def query_quota(base_url: str, api_key: str) -> QuotaData:
         for item in data.get("limits", []):
             t = item.get("type")
             if t == "TOKENS_LIMIT":
-                result.token_pct = float(item.get("percentage", 0) or 0)
-                result.token_reset_ts = item.get("nextResetTime")
+                # 可能有多个 token 窗口（5h + 周），全部收集
+                result.token_limits.append(TokenLimit(
+                    pct=float(item.get("percentage", 0) or 0),
+                    reset_ts=item.get("nextResetTime"),
+                    unit=int(item.get("unit", 0) or 0),
+                    number=int(item.get("number", 0) or 0),
+                ))
             elif t == "TIME_LIMIT":
                 result.mcp_pct = float(item.get("percentage", 0) or 0)
                 result.mcp_current = int(item.get("currentValue", 0) or 0)

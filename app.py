@@ -141,6 +141,7 @@ class FloatingBar(tk.Toplevel):
         body = tk.Frame(card, bg=BG)
         body.pack(fill=BOTH, padx=16, pady=(0, 8))
         self.token_row = self._make_row(body, "TOKEN · 5H WINDOW", is_token=True)
+        self.week_row = self._make_row(body, "TOKEN · WEEKLY", is_token=True)
         self.mcp_row = self._make_row(body, "MCP · MONTHLY", is_token=False)
 
         # 5h 重置倒计时高亮区
@@ -296,11 +297,13 @@ class FloatingBar(tk.Toplevel):
         """窗口显示后强制重绘进度条（解决 winfo_width=0 的问题）。"""
         try:
             self._draw_bar(self._bars[self.token_row["bar_key"]], self._last_token_pct)
+            self._draw_bar(self._bars[self.week_row["bar_key"]], self._last_week_pct)
             self._draw_bar(self._bars[self.mcp_row["bar_key"]], self._last_mcp_pct)
         except Exception:
             pass
 
     _last_token_pct = 0.0
+    _last_week_pct = 0.0
     _last_mcp_pct = 0.0
 
     def update_data(self, data: quota.QuotaData):
@@ -312,11 +315,15 @@ class FloatingBar(tk.Toplevel):
             self.token_row["pct"].set("···")
             self.token_row["pct_lbl"].config(fg=FG_DIM)
             self.token_row["sub"].set("首次查询中…")
+            self.week_row["pct"].set("···")
+            self.week_row["pct_lbl"].config(fg=FG_DIM)
+            self.week_row["sub"].set("")
             self.mcp_row["pct"].set("···")
             self.mcp_row["pct_lbl"].config(fg=FG_DIM)
             self.mcp_row["sub"].set("")
-            self._last_token_pct = self._last_mcp_pct = 0
+            self._last_token_pct = self._last_week_pct = self._last_mcp_pct = 0
             self._draw_bar(self._bars[self.token_row["bar_key"]], 0)
+            self._draw_bar(self._bars[self.week_row["bar_key"]], 0)
             self._draw_bar(self._bars[self.mcp_row["bar_key"]], 0)
             self.reset_cd_var.set("LOADING…")
             self.status_lbl.config(text="⟳ 正在获取额度数据…")
@@ -326,24 +333,42 @@ class FloatingBar(tk.Toplevel):
             self.token_row["pct"].set("ERR")
             self.token_row["pct_lbl"].config(fg=COLOR_DANGER)
             self.token_row["sub"].set(data.error[:28])
+            self.week_row["pct"].set("--")
+            self.week_row["sub"].set("")
             self.mcp_row["pct"].set("--")
             self.mcp_row["sub"].set("")
-            self._last_token_pct = self._last_mcp_pct = 0
+            self._last_token_pct = self._last_week_pct = self._last_mcp_pct = 0
             self._draw_bar(self._bars[self.token_row["bar_key"]], 0)
+            self._draw_bar(self._bars[self.week_row["bar_key"]], 0)
             self._draw_bar(self._bars[self.mcp_row["bar_key"]], 0)
             self.reset_cd_var.set("CONNECTION ERROR")
             self.status_lbl.config(text=f"✗ 失败 · {datetime.now():%H:%M}")
             return
 
-        # Token 行
-        self.token_row["pct"].set(f"{data.token_pct:.0f}%")
-        tfill, _ = self._grade(data.token_pct)
-        self.token_row["pct_lbl"].config(fg=tfill)
-        self._last_token_pct = data.token_pct
-        cd = quota.ts_to_countdown(data.token_reset_ts)
-        clk = quota.ts_to_clock(data.token_reset_ts)
-        self.token_row["sub"].set(f"重置于 {clk}" if clk else "")
-        self._draw_bar(self._bars[self.token_row["bar_key"]], data.token_pct)
+        # Token 行（5h 窗口）
+        t5h = data.token_5h
+        if t5h:
+            self.token_row["pct"].set(f"{t5h.pct:.0f}%")
+            tfill, _ = self._grade(t5h.pct)
+            self.token_row["pct_lbl"].config(fg=tfill)
+            self._last_token_pct = t5h.pct
+            clk = quota.ts_to_clock(t5h.reset_ts)
+            self.token_row["sub"].set(f"重置于 {clk}" if clk else "")
+            self._draw_bar(self._bars[self.token_row["bar_key"]], t5h.pct)
+        else:
+            self.token_row["pct"].set("--")
+            self._draw_bar(self._bars[self.token_row["bar_key"]], 0)
+
+        # 周 token 窗口（如果有）
+        tw = data.token_weekly
+        if tw and hasattr(self, "week_row"):
+            self.week_row["pct"].set(f"{tw.pct:.0f}%")
+            wfill, _ = self._grade(tw.pct)
+            self.week_row["pct_lbl"].config(fg=wfill)
+            self._last_week_pct = tw.pct
+            wclk = quota.ts_to_clock(tw.reset_ts)
+            self.week_row["sub"].set(f"重置于 {wclk}" if wclk else "")
+            self._draw_bar(self._bars[self.week_row["bar_key"]], tw.pct)
 
         # MCP 行
         self.mcp_row["pct"].set(f"{data.mcp_pct:.0f}%")
@@ -357,8 +382,9 @@ class FloatingBar(tk.Toplevel):
         self.mcp_row["sub"].set(mcp_sub)
         self._draw_bar(self._bars[self.mcp_row["bar_key"]], data.mcp_pct)
 
-        # 5h 重置倒计时（高亮大字）
-        self._update_reset_countdown(data.token_reset_ts)
+        # 5h 重置倒计时（高亮大字）——用真正的 5h 窗口时间戳
+        t5h_for_cd = data.token_5h
+        self._update_reset_countdown(t5h_for_cd.reset_ts if t5h_for_cd else None)
 
         # 状态行
         next_min = self.cfg.interval_min
@@ -380,15 +406,7 @@ class FloatingBar(tk.Toplevel):
             return
         delta = datetime.fromtimestamp(ts / 1000) - datetime.now()
         secs = max(0, int(delta.total_seconds()))
-        # 5h 窗口理论上限就是 5 小时；超过 6h 说明窗口还没被激活
-        # （新账号/新 key 未产生过调用时，接口返回的是占位重置点）
-        # 此时显示友好提示，而不是一个荒谬的大数字
         sub = getattr(self, "reset_sub_var", None)
-        if secs > 6 * 3600:
-            self.reset_cd_var.set("NOT ACTIVE")
-            if sub:
-                sub.set("窗口未激活 · 调用一次模型后开始计时")
-            return
         if sub:
             sub.set("5H 窗口重置倒计时")
         h, rem = divmod(secs, 3600)
@@ -616,10 +634,17 @@ class App:
     def _update_tooltip(self):
         d = self.last_data
         if d.error:
-            tip = f"GLM 额度 · 查询失败"
+            tip = "GLM 额度 · 查询失败"
+        elif d.is_empty:
+            tip = "GLM 额度 · 加载中…"
         else:
             lvl = d.level.upper() if d.level else "—"
-            tip = f"GLM 额度 · {lvl}\nToken(5h): {d.token_pct:.0f}%\nMCP(月): {d.mcp_pct:.0f}% ({d.mcp_current}/{d.mcp_total})"
+            t5h_pct = d.token_5h.pct if d.token_5h else 0
+            tw_pct = d.token_weekly.pct if d.token_weekly else 0
+            tip = (f"GLM 额度 · {lvl}\n"
+                   f"Token(5h): {t5h_pct:.0f}%\n"
+                   f"Token(周): {tw_pct:.0f}%\n"
+                   f"MCP(月): {d.mcp_pct:.0f}% ({d.mcp_current}/{d.mcp_total})")
         try:
             self.icon.title = tip
         except Exception:
