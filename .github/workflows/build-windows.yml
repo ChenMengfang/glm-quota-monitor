@@ -1,0 +1,65 @@
+# 自动构建 Windows exe 并附加到 Release
+#
+# 触发条件：
+#   1. 推送 v* 开头的 tag（如 v2.0）→ 自动构建并附加到该 tag 的 Release
+#   2. 手动触发（workflow_dispatch）→ 构建产物作为 CI artifact 供下载测试
+#
+# 在 windows-latest 上用 Python 3.12 + PyInstaller 打包。
+name: Build Windows EXE
+
+on:
+  push:
+    tags:
+      - 'v*'          # 推送版本 tag 时自动构建
+  workflow_dispatch:   # 支持手动触发
+
+permissions:
+  contents: write      # 允许上传产物到 Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 打包 exe
+        run: |
+          pyinstaller --noconfirm --noconsole --onefile `
+            --name "GLM额度助手" `
+            --icon app_icon.ico `
+            --collect-submodules pystray `
+            --add-data "app_icon.png;." `
+            app.py
+
+      - name: 重命名为带平台后缀
+        shell: bash
+        run: |
+          mv "dist/GLM额度助手.exe" "dist/GLM额度助手-Windows.exe"
+
+      # tag 触发：附加到对应 Release
+      - name: 上传到 Release（tag 触发时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/GLM额度助手-Windows.exe
+
+      # 手动触发：作为 CI artifact 供下载测试
+      - name: 上传构建产物（手动触发时）
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GLM额度助手-Windows
+          path: dist/GLM额度助手-Windows.exe
