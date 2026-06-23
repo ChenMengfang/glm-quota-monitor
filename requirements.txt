@@ -1,3 +1,6 @@
 pystray>=0.19.5
 Pillow>=10.0.0
 pyinstaller>=6.0.0
+# macOS 系统托盘后端（pystray 依赖）；Windows/Linux 上会自动忽略
+pyobjc-core>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"

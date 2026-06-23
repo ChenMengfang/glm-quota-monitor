@@ -32,6 +32,13 @@ _*.py
 _*.mjs
 preview_*.png
 *.log
+*.lock
+
+# AI 助手本地配置（含本地权限设置，不上传）
+.claude/
+
+# 图标生成临时脚本（图标成品 app_icon.icns/png 需上传，生成器不上传）
+gen_icon.py
 
 # 本机配置（含 API Key，禁止上传）
 config.json
