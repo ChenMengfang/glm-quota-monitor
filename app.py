@@ -1348,10 +1348,18 @@ class App:
 
 
 def main():
-    # 高 DPI 感知
+    # 高 DPI 感知：用 per-monitor v2（2），让窗口在高分屏/缩放下保持清晰。
+    # 旧的 SetProcessDpiAwareness(1) 只是系统级感知，多屏或缩放变化时会模糊。
+    # 优先用新版 API（SetProcessDpiAwarenessContext，Win10 1703+），
+    # 不支持时回退到旧版 SetProcessDpiAwareness(2)。
     try:
         import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        try:
+            # PER_MONITOR_AWARE_V2 = -4（Win10 1703+，推荐）
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+        except (AttributeError, OSError):
+            # 回退：PER_MONITOR_AWARE = 2
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
         pass
 
