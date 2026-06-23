@@ -91,30 +91,16 @@ def apply_theme(name: str = "scifi") -> None:
 
 
 def apply_window_transparency(win, want_magic_bg: bool = True) -> None:
-    """让无边框窗口在 Windows 上实现"任意形状"。
+    """窗口背景设置（实色）。
 
-    macOS 原生支持任意形状窗口（背景透明区域天然不捕获点击/不渲染），
-    无需处理。Windows 的 tkinter 不支持窗口级真透明，但提供
-    `-transparentcolor` 属性：把它设为某颜色，窗口上该颜色的像素就会
-    完全透明（鼠标穿透）。
+    历史上尝试用 -transparentcolor + 魔法色实现异形窗口（药丸形），但和
+    PIL 抗锯齿是死结：胶囊填充色和魔法色混合必然产生过渡色（如 #c410cb），
+    -transparentcolor（只认纯色）识别不了，留下粉红边。
 
-    做法：把窗口背景设为魔法品红色 WIN_MAGIC_PINK，再设 -transparentcolor
-    为同一颜色。这样窗口矩形的"空白四角"（品红）变透明，只留下实际绘制的
-    胶囊/卡片内容，从而在 Windows 上也呈现胶囊形。
-
-    参数 want_magic_bg：True=用魔法色做背景（用于胶囊/圆角卡片）；False=用
-    主题 BG 做背景（用于矩形全填充窗口，如主悬浮条，不需要异形）。
+    现方案：放弃异形透明，所有窗口用实色 BG 背景。胶囊用圆角矩形贴图
+    （圆角外填窗口BG色，视觉融合），抗锯齿完美无红边。本函数统一设实色背景。
     """
-    if not IS_WIN:
-        return
-    bg = WIN_MAGIC_PINK if want_magic_bg else BG
-    try:
-        win.configure(bg=bg)
-        if want_magic_bg:
-            win.attributes("-transparentcolor", WIN_MAGIC_PINK)
-    except tk.TclError:
-        # 极旧 Windows 或非 win32 预览，忽略
-        pass
+    win.configure(bg=BG)
 
 
 def round_rect(canvas, x1, y1, x2, y2, r, **kw):
@@ -132,8 +118,79 @@ def round_rect(canvas, x1, y1, x2, y2, r, **kw):
 
 
 # ──────────────────────────────────────────────────────────────
-# 平台相关：字体 / 托盘可用性
+# 抗锯齿渲染：tkinter 的 create_arc/create_polygon 在 Windows 上无抗锯齿，
+# 圆环和圆角边缘全是锯齿。改用 PIL 超采样（先画 4x 大再缩小）实现抗锯齿。
+# macOS 的 Cocoa 后端原生抗锯齿，但 PIL 方案两平台通用，统一用之。
 # ──────────────────────────────────────────────────────────────
+_SS = 4  # 超采样倍数：先画到 4 倍尺寸，再 LANCZOS 缩小，触发抗锯齿
+
+
+def _pil_ring(size: int, pct: float, fill: str, track: str = BG_BAR_TRACK,
+              thick: int | None = None, bg: str | None = None) -> "Image.Image":
+    """用 PIL 超采样画抗锯齿环形进度。返回 Image（不含环心文字）。
+
+    pct 为 0-100 的百分比。pct>0 时画进度弧，否则只画空轨道。
+
+    bg 关键参数：背景色。抗锯齿的边缘半透明像素会和 bg 混合。
+    - Windows 异形窗口：传 WIN_MAGIC_PINK（RGB 模式），混合结果仍是
+      魔法色系，能被 -transparentcolor 识别 → 无红线。
+    - 实色矩形窗口：传主题 BG，边缘和背景自然融合。
+    - 不传则透明 RGBA（仅 macOS 用）。
+    """
+    from PIL import Image, ImageDraw
+    thick = thick or max(4, size // 8)
+    big = size * _SS
+    t = thick * _SS
+    pad = t // 2 + _SS
+    # 决定背景色和模式
+    if bg is not None:
+        img = Image.new("RGB", (big, big), bg)
+    else:
+        img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    bbox = [pad, pad, big - pad, big - pad]
+    # 背景轨道（整圈）
+    d.ellipse(bbox, outline=track, width=t)
+    # 进度弧（从 12 点钟顺时针）
+    if pct > 0:
+        end_angle = 90 - 360 * min(pct, 100) / 100
+        d.arc(bbox, start=90, end=end_angle, fill=fill, width=t)
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def _pil_round_rect(w: int, h: int, fill: str, outline: str = "",
+                    r: int | None = None, bg: str = BG) -> "Image.Image":
+    """用 PIL 超采样画抗锯齿圆角矩形（r=h/2 即两端半圆胶囊形）。返回 RGB Image。
+
+    bg 是窗口背景色，会填满圆角外的区域，让胶囊和窗口视觉融合。
+    抗锯齿边缘 = fill↔bg 混合，因为窗口就是 bg 色，所以融合自然无突兀边。
+    """
+    from PIL import Image, ImageDraw
+    r = r if r is not None else h // 2
+    big_w, big_h = w * _SS, h * _SS
+    img = Image.new("RGB", (big_w, big_h), bg)
+    d = ImageDraw.Draw(img)
+    rr = r * _SS
+    kw = {"fill": fill, "radius": rr}
+    if outline:
+        kw["outline"] = outline
+        kw["width"] = _SS
+    d.rounded_rectangle([0, 0, big_w - 1, big_h - 1], **kw)
+    return img.resize((w, h), Image.LANCZOS)
+
+
+def _set_canvas_image(canvas, img, keep: bool = True):
+    """把 PIL Image 贴到 tkinter Canvas（抗锯齿渲染的统一入口）。
+
+    keep=True 会持有 PhotoImage 引用防 GC（绘制到固定 canvas 时用）。
+    返回 create_image 的 item id。
+    """
+    from PIL import ImageTk
+    canvas.delete("all")
+    photo = ImageTk.PhotoImage(img)
+    # 防止 PhotoImage 被 GC 回收导致图片消失
+    canvas._aa_photo = photo  # noqa: SLF001
+    return canvas.create_image(0, 0, image=photo, anchor="nw")
 # Windows 原生用 Segoe UI；等宽字用 Cascadia Code（VS Code 同款，比 Consolas
 # 在小字号下清晰得多），不存在时 tkinter 自动回退。macOS/Linux 用系统自带字体。
 IS_MAC = sys.platform == "darwin"
@@ -229,18 +286,12 @@ class MiniBar(tk.Toplevel):
             self.attributes("-alpha", 0.88)
         except tk.TclError:
             pass
-        # Windows 用魔法色背景 + transparentcolor 实现胶囊异形；
-        # macOS 直接用主题 BG（原生支持任意形状窗口）
-        apply_window_transparency(self, want_magic_bg=IS_WIN)
-        if not IS_WIN:
-            self.configure(bg=BG)
+        # 实色 BG 背景（放弃 transparentcolor 异形，避免抗锯齿红边）
+        self.configure(bg=BG)
 
         # 按样式构建不同容器底色（布局结构统一：两个迷你环）
         self._interactive = []
-        if self.style == "block":
-            self._build()
-        else:
-            self._build()
+        self._build()
 
         # 绑交互
         for w in self._interactive:
@@ -258,50 +309,22 @@ class MiniBar(tk.Toplevel):
         self.refresh()
 
     def _build(self):
-        """统一布局：两个迷你环（5H / 周），各带下方小标签。
+        """极简布局：只有一个居中的 5H 圆环。
 
-        Windows 关键：窗口背景为魔法品红色 + -transparentcolor，
-        矩形四角透明。胶囊本体用一个 Canvas 画圆角矩形（_round_rect），
-        Canvas 透明区域（圆角外）保留魔法色 → 也透明。
-        这样 Windows 上也呈现真正的胶囊形，和 macOS 一致。
+        矩形窗口（看不见边）+ 居中的圆形进度环（PIL 抗锯齿平滑）。
+        环心显示 5h 百分比。点击展开看全部信息。
         """
-        bg_card = BG_CARD if self.style == "block" else BG
-        # Windows 上窗口背景已是魔法色（透明），内部 Canvas 需要透明背景
-        canvas_bg = WIN_MAGIC_PINK if IS_WIN else bg_card
-
-        # 胶囊本体 Canvas：负责画圆角矩形底（Windows 异形的关键）
-        self._capsule_w = 120
+        self._capsule_w = 64
         self._capsule_h = 64
         self.canvas = tk.Canvas(self, width=self._capsule_w,
-                                height=self._capsule_h, bg=canvas_bg,
+                                height=self._capsule_h, bg=BG,
                                 bd=0, highlightthickness=0)
         self.canvas.pack()
-        # 画胶囊底（圆角矩形，胶囊形：r 取高度一半即为两端半圆）
-        r = self._capsule_h // 2 - 2
-        round_rect(self.canvas, 1, 1, self._capsule_w - 1,
-                   self._capsule_h - 1, r, fill=bg_card, outline=EDGE)
+        self.ring5h = self.canvas
+        # 兼容旧代码引用（避免 refresh 报错）
+        self.ring_week = self.canvas
 
-        # 在 Canvas 上放置两个迷你环（用 create_window 嵌套）
-        # 左：5H 环
-        left = tk.Frame(self.canvas, bg=bg_card)
-        self.ring5h = tk.Canvas(left, width=32, height=32, bg=bg_card,
-                                bd=0, highlightthickness=0)
-        self.ring5h.pack()
-        tk.Label(left, text="5H", bg=bg_card, fg=FG_DIM,
-                 font=(FONT_MONO, fs(7))).pack(anchor="center")
-        self.canvas.create_window(36, self._capsule_h // 2, window=left)
-
-        # 右：周环
-        right = tk.Frame(self.canvas, bg=bg_card)
-        self.ring_week = tk.Canvas(right, width=32, height=32, bg=bg_card,
-                                   bd=0, highlightthickness=0)
-        self.ring_week.pack()
-        tk.Label(right, text="周", bg=bg_card, fg=FG_DIM,
-                 font=(FONT_MONO, fs(7))).pack(anchor="center")
-        self.canvas.create_window(84, self._capsule_h // 2, window=right)
-
-        self._interactive = [self, self.canvas, left, right,
-                             self.ring5h, self.ring_week]
+        self._interactive = [self, self.canvas]
 
     def show_at(self, x, y):
         try:
@@ -335,28 +358,18 @@ class MiniBar(tk.Toplevel):
             pw = data.token_weekly.pct if data.token_weekly else 0
             _, fw = FloatingBar._grade(pw)
 
+        # 极简：只画 5H 圆环
         self._draw_mini_ring(self.ring5h, p5, f5)
-        self._draw_mini_ring(self.ring_week, pw, fw)
 
     def _draw_mini_ring(self, canvas, pct, fill):
-        """迷你环形进度（小尺寸版，与主表盘同款画法）。"""
-        canvas.delete("all")
-        d = 36
-        pad = 4
-        x1, y1, x2, y2 = pad, pad, d - pad, d - pad
-        thick = 3
-        # 背景轨道
-        canvas.create_arc(x1, y1, x2, y2, start=90, extent=-359,
-                          style="arc", width=thick, outline=BG_BAR_TRACK)
-        # 进度弧
-        if pct > 0:
-            canvas.create_arc(x1, y1, x2, y2, start=90,
-                              extent=-359 * min(pct, 100) / 100,
-                              style="arc", width=thick, outline=fill)
-        # 环心百分比
+        """5H 圆环（PIL 超采样抗锯齿）。背景用主题 BG，抗锯齿边缘和窗口融合。"""
+        d = 60
+        ring_img = _pil_ring(d, pct, fill=fill if pct > 0 else BG_BAR_TRACK,
+                             track=BG_BAR_TRACK, thick=6, bg=BG)
+        _set_canvas_image(canvas, ring_img)
         cx = d / 2
         canvas.create_text(cx, cx, text=f"{pct:.0f}", fill=fill,
-                           font=(FONT_MONO, fs(9), "bold"))
+                           font=(FONT_MONO, fs(14), "bold"))
 
     def _schedule(self):
         """每秒从主应用同步数据（独立于主刷新周期）。"""
@@ -717,20 +730,9 @@ class FloatingBar(tk.Toplevel):
                 if self._warning_phase:
                     self._draw_ring(canvas, pct)
                 else:
-                    # 暗相位：只画空轨道，隐藏进度弧
-                    canvas.delete("all")
-                    size = max(int(canvas.cget("height")), 60)
-                    pad = 6
-                    canvas.create_arc(pad, pad, size - pad, size - pad,
-                                      start=90, extent=-359, style="arc",
-                                      width=max(4, size // 12),
-                                      outline=BG_BAR_TRACK)
-                    cx = size / 2
-                    canvas.create_text(cx, cx - 3,
-                                       text=f"{pct:.0f}", fill=FG,
-                                       font=(FONT_UI_SEMI, fs(max(12, size // 4)), "bold"))
-                    canvas.create_text(cx, cx + size // 5, text="%",
-                                       fill=FG_DIM, font=(FONT_MONO, fs(max(7, size // 10))))
+                    # 暗相位：只画空轨道（pct=0），隐藏进度弧
+                    # 复用 _draw_ring 保证抗锯齿一致
+                    self._draw_ring(canvas, 0)
                 # 百分比文字也跟着闪
                 row["pct_lbl"].config(fg=color)
             self._warning_phase = not self._warning_phase
@@ -798,7 +800,6 @@ class FloatingBar(tk.Toplevel):
         - 环心显示百分比大字（数值 + % 小字，强视觉层次）
         - pct=0 时只画空轨道，不画进度弧
         """
-        canvas.delete("all")
         size = canvas.winfo_width()
         if size < 20:
             size = int(canvas.cget("height"))
@@ -809,30 +810,21 @@ class FloatingBar(tk.Toplevel):
         d = min(size, h)
         if d < 20:
             d = 60
-        pad = 6
-        x1, y1, x2, y2 = pad, pad, d - pad, d - pad
         thick = max(4, d // 12)   # 环厚随尺寸缩放
 
-        # 1. 背景轨道（整圈）
-        canvas.create_arc(x1, y1, x2, y2, start=90, extent=-359,
-                          style="arc", width=thick, outline=BG_BAR_TRACK)
+        # 1. 用 PIL 超采样画抗锯齿圆环（解决 tkinter create_arc 锯齿）
+        # 背景用主题 BG（圆环 Canvas 是实色背景），抗锯齿边缘和 BG 融合
+        fill = self._grade(pct)[0] if pct > 0 else BG_BAR_TRACK
+        ring_img = _pil_ring(d, pct, fill=fill, thick=thick, bg=BG)
+        _set_canvas_image(canvas, ring_img)
 
-        # 2. 进度弧
-        if pct > 0:
-            fill, _ = self._grade(pct)
-            ext = -359 * min(pct, 100) / 100
-            canvas.create_arc(x1, y1, x2, y2, start=90, extent=ext,
-                              style="arc", width=thick, outline=fill)
-
-        # 3. 环心百分比文字（数值大 + % 小）
+        # 2. 环心百分比文字（用 canvas text，字体本身已有抗锯齿）
         cx = d / 2
         num = f"{pct:.0f}"
-        # 数值
         canvas.create_text(cx, cx - 3, text=num, fill=FG,
-                           font=(FONT_UI_SEMI, max(12, d // 4), "bold"))
-        # % 号
+                           font=(FONT_UI_SEMI, fs(max(12, d // 4)), "bold"))
         canvas.create_text(cx, cx + d // 5, text="%",
-                           fill=FG_DIM, font=(FONT_MONO, max(7, d // 10)))
+                           fill=FG_DIM, font=(FONT_MONO, fs(max(7, d // 10))))
 
     @staticmethod
     def _round_rect(canvas, x1, y1, x2, y2, r, **kw):
