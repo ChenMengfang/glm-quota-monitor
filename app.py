@@ -64,6 +64,12 @@ EDGE = "#2a3441"
 # 折叠胶囊样式
 CAPSULE_STYLE = "dots"
 
+# Windows 胶囊形状专用"魔法色"：用作窗口背景 + transparentcolor，
+# 让无边框窗口矩形四角透明，只露出胶囊/卡片内容。
+# 选品红色（#ff00ff）因为它是 UI 里几乎不会出现的颜色，安全可透明。
+# macOS 不需要这个（原生支持任意形状窗口），所以只有 Windows 用。
+WIN_MAGIC_PINK = "#ff00ff"
+
 
 def apply_theme(name: str = "scifi") -> None:
     """按主题名重新赋值模块级配色常量。须在任何 Toplevel 创建前调用。"""
@@ -82,6 +88,47 @@ def apply_theme(name: str = "scifi") -> None:
     HOVER = t["HOVER"]
     EDGE = t["EDGE"]
     CAPSULE_STYLE = t["CAPSULE"]
+
+
+def apply_window_transparency(win, want_magic_bg: bool = True) -> None:
+    """让无边框窗口在 Windows 上实现"任意形状"。
+
+    macOS 原生支持任意形状窗口（背景透明区域天然不捕获点击/不渲染），
+    无需处理。Windows 的 tkinter 不支持窗口级真透明，但提供
+    `-transparentcolor` 属性：把它设为某颜色，窗口上该颜色的像素就会
+    完全透明（鼠标穿透）。
+
+    做法：把窗口背景设为魔法品红色 WIN_MAGIC_PINK，再设 -transparentcolor
+    为同一颜色。这样窗口矩形的"空白四角"（品红）变透明，只留下实际绘制的
+    胶囊/卡片内容，从而在 Windows 上也呈现胶囊形。
+
+    参数 want_magic_bg：True=用魔法色做背景（用于胶囊/圆角卡片）；False=用
+    主题 BG 做背景（用于矩形全填充窗口，如主悬浮条，不需要异形）。
+    """
+    if not IS_WIN:
+        return
+    bg = WIN_MAGIC_PINK if want_magic_bg else BG
+    try:
+        win.configure(bg=bg)
+        if want_magic_bg:
+            win.attributes("-transparentcolor", WIN_MAGIC_PINK)
+    except tk.TclError:
+        # 极旧 Windows 或非 win32 预览，忽略
+        pass
+
+
+def round_rect(canvas, x1, y1, x2, y2, r, **kw):
+    """用平滑多边形在 Canvas 上画圆角矩形（tkinter Frame 不支持圆角）。
+
+    返回 polygon item id。两个窗口类（MiniBar / FloatingBar）共用。
+    r 取高度一半即为两端半圆的真正胶囊形。
+    """
+    points = [
+        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+    ]
+    return canvas.create_polygon(points, smooth=True, **kw)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -169,7 +216,11 @@ class MiniBar(tk.Toplevel):
             self.attributes("-alpha", 0.88)
         except tk.TclError:
             pass
-        self.configure(bg=BG)
+        # Windows 用魔法色背景 + transparentcolor 实现胶囊异形；
+        # macOS 直接用主题 BG（原生支持任意形状窗口）
+        apply_window_transparency(self, want_magic_bg=IS_WIN)
+        if not IS_WIN:
+            self.configure(bg=BG)
 
         # 按样式构建不同容器底色（布局结构统一：两个迷你环）
         self._interactive = []
@@ -194,33 +245,49 @@ class MiniBar(tk.Toplevel):
         self.refresh()
 
     def _build(self):
-        """统一布局：两个迷你环（5H / 周），各带下方小标签。"""
-        bg_card = BG_CARD if self.style == "block" else BG
-        card = tk.Frame(self, bg=bg_card, highlightbackground=EDGE,
-                        highlightthickness=1)
-        card.pack(fill=BOTH, expand=True)
-        inner = tk.Frame(card, bg=bg_card)
-        inner.pack(padx=10, pady=7)
+        """统一布局：两个迷你环（5H / 周），各带下方小标签。
 
+        Windows 关键：窗口背景为魔法品红色 + -transparentcolor，
+        矩形四角透明。胶囊本体用一个 Canvas 画圆角矩形（_round_rect），
+        Canvas 透明区域（圆角外）保留魔法色 → 也透明。
+        这样 Windows 上也呈现真正的胶囊形，和 macOS 一致。
+        """
+        bg_card = BG_CARD if self.style == "block" else BG
+        # Windows 上窗口背景已是魔法色（透明），内部 Canvas 需要透明背景
+        canvas_bg = WIN_MAGIC_PINK if IS_WIN else bg_card
+
+        # 胶囊本体 Canvas：负责画圆角矩形底（Windows 异形的关键）
+        self._capsule_w = 120
+        self._capsule_h = 64
+        self.canvas = tk.Canvas(self, width=self._capsule_w,
+                                height=self._capsule_h, bg=canvas_bg,
+                                bd=0, highlightthickness=0)
+        self.canvas.pack()
+        # 画胶囊底（圆角矩形，胶囊形：r 取高度一半即为两端半圆）
+        r = self._capsule_h // 2 - 2
+        round_rect(self.canvas, 1, 1, self._capsule_w - 1,
+                   self._capsule_h - 1, r, fill=bg_card, outline=EDGE)
+
+        # 在 Canvas 上放置两个迷你环（用 create_window 嵌套）
         # 左：5H 环
-        left = tk.Frame(inner, bg=bg_card)
-        left.pack(side=LEFT, padx=(0, 10))
-        self.ring5h = tk.Canvas(left, width=36, height=36, bg=bg_card,
+        left = tk.Frame(self.canvas, bg=bg_card)
+        self.ring5h = tk.Canvas(left, width=32, height=32, bg=bg_card,
                                 bd=0, highlightthickness=0)
         self.ring5h.pack()
         tk.Label(left, text="5H", bg=bg_card, fg=FG_DIM,
                  font=(FONT_MONO, 7)).pack(anchor="center")
+        self.canvas.create_window(36, self._capsule_h // 2, window=left)
 
         # 右：周环
-        right = tk.Frame(inner, bg=bg_card)
-        right.pack(side=LEFT)
-        self.ring_week = tk.Canvas(right, width=36, height=36, bg=bg_card,
+        right = tk.Frame(self.canvas, bg=bg_card)
+        self.ring_week = tk.Canvas(right, width=32, height=32, bg=bg_card,
                                    bd=0, highlightthickness=0)
         self.ring_week.pack()
         tk.Label(right, text="周", bg=bg_card, fg=FG_DIM,
                  font=(FONT_MONO, 7)).pack(anchor="center")
+        self.canvas.create_window(84, self._capsule_h // 2, window=right)
 
-        self._interactive = [self, card, inner, left, right,
+        self._interactive = [self, self.canvas, left, right,
                              self.ring5h, self.ring_week]
 
     def show_at(self, x, y):
@@ -757,12 +824,7 @@ class FloatingBar(tk.Toplevel):
     @staticmethod
     def _round_rect(canvas, x1, y1, x2, y2, r, **kw):
         """用 arc+rectangle 拼一个圆角矩形（tkinter Frame 不支持圆角）。返回 item id。"""
-        points = [
-            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-            x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
-        ]
-        return canvas.create_polygon(points, smooth=True, **kw)
+        return round_rect(canvas, x1, y1, x2, y2, r, **kw)
 
     @staticmethod
     def _lighten(hex_color, strong=False):
