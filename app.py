@@ -134,14 +134,16 @@ def round_rect(canvas, x1, y1, x2, y2, r, **kw):
 # ──────────────────────────────────────────────────────────────
 # 平台相关：字体 / 托盘可用性
 # ──────────────────────────────────────────────────────────────
-# Windows 原生用 Segoe UI / Consolas；macOS / Linux 改用系统自带字体，
-# 避免字体回退导致的显示异常。
+# Windows 原生用 Segoe UI；等宽字用 Cascadia Code（VS Code 同款，比 Consolas
+# 在小字号下清晰得多），不存在时 tkinter 自动回退。macOS/Linux 用系统自带字体。
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 if IS_WIN:
     FONT_UI = "Segoe UI"
     FONT_UI_SEMI = "Segoe UI Semibold"
-    FONT_MONO = "Consolas"
+    # Cascadia Code 是微软新等宽字体，小字号下比 Consolas 清晰；
+    # 若未安装 tkinter 会回退到系统默认等宽字体
+    FONT_MONO = "Cascadia Code"
 elif IS_MAC:
     FONT_UI = "Helvetica Neue"
     FONT_UI_SEMI = "Helvetica Neue Bold"
@@ -150,6 +152,17 @@ else:
     FONT_UI = "DejaVu Sans"
     FONT_UI_SEMI = "DejaVu Sans"
     FONT_MONO = "DejaVu Sans Mono"
+
+# Windows 上 tkinter 字号单位是像素，GDI 对小字号抗锯齿差，7-8px 会糊。
+# macOS 字号单位是点（pt），天然比同数值的 px 大且清晰。
+# 用 fs() 包装所有字号：Windows 上整体 +2 并设最小值 9，补偿渲染差异。
+_FONT_BUMP = 2 if IS_WIN else 0
+_FONT_MIN = 9 if IS_WIN else 1
+
+
+def fs(size: int) -> int:
+    """字号缩放：Windows 上 +2 且不低于 9，其他平台原样返回。"""
+    return max(_FONT_MIN, size + _FONT_BUMP)
 
 
 def _lighten(hex_color: str, amt: int = 40) -> str:
@@ -275,7 +288,7 @@ class MiniBar(tk.Toplevel):
                                 bd=0, highlightthickness=0)
         self.ring5h.pack()
         tk.Label(left, text="5H", bg=bg_card, fg=FG_DIM,
-                 font=(FONT_MONO, 7)).pack(anchor="center")
+                 font=(FONT_MONO, fs(7))).pack(anchor="center")
         self.canvas.create_window(36, self._capsule_h // 2, window=left)
 
         # 右：周环
@@ -284,7 +297,7 @@ class MiniBar(tk.Toplevel):
                                    bd=0, highlightthickness=0)
         self.ring_week.pack()
         tk.Label(right, text="周", bg=bg_card, fg=FG_DIM,
-                 font=(FONT_MONO, 7)).pack(anchor="center")
+                 font=(FONT_MONO, fs(7))).pack(anchor="center")
         self.canvas.create_window(84, self._capsule_h // 2, window=right)
 
         self._interactive = [self, self.canvas, left, right,
@@ -343,7 +356,7 @@ class MiniBar(tk.Toplevel):
         # 环心百分比
         cx = d / 2
         canvas.create_text(cx, cx, text=f"{pct:.0f}", fill=fill,
-                           font=(FONT_MONO, 9, "bold"))
+                           font=(FONT_MONO, fs(9), "bold"))
 
     def _schedule(self):
         """每秒从主应用同步数据（独立于主刷新周期）。"""
@@ -439,12 +452,12 @@ class FloatingBar(tk.Toplevel):
         head.pack(fill=X, padx=16, pady=(10, 2))
         self.title_lbl = tk.Label(
             head, text=self._head_text(), bg=BG, fg=ACCENT,
-            font=(FONT_UI_SEMI, 11), anchor="w"
+            font=(FONT_UI_SEMI, fs(11)), anchor="w"
         )
         self.title_lbl.pack(side=LEFT)
         close_btn = tk.Label(
             head, text="✕", bg=BG, fg=FG_DIM,
-            font=(FONT_UI, 10), cursor="hand2"
+            font=(FONT_UI, fs(10)), cursor="hand2"
         )
         close_btn.pack(side=RIGHT)
         close_btn.bind("<Button-1>", lambda e: self.hide())
@@ -469,7 +482,7 @@ class FloatingBar(tk.Toplevel):
         # 底部状态行
         self.status_lbl = tk.Label(
             card, text="⟳ 初始化中…", bg=BG, fg=FG_DIM,
-            font=(FONT_MONO, 8), anchor="w"
+            font=(FONT_MONO, fs(8)), anchor="w"
         )
         self.status_lbl.pack(fill=X, padx=16, pady=(0, 10))
 
@@ -486,15 +499,15 @@ class FloatingBar(tk.Toplevel):
         left = tk.Frame(wrap, bg=BG_BAR_TRACK)
         left.pack(side=LEFT, padx=12, pady=8)
         tk.Label(left, text="◷  RESET IN", bg=BG_BAR_TRACK, fg=FG_DIM,
-                 font=(FONT_MONO, 8)).pack(anchor="w")
+                 font=(FONT_MONO, fs(8))).pack(anchor="w")
         # 副标题（窗口未激活时会改成提示文字）
         self.reset_sub_var = tk.StringVar(value="5H 窗口重置倒计时")
         tk.Label(left, textvariable=self.reset_sub_var, bg=BG_BAR_TRACK, fg=FG,
-                 font=(FONT_UI, 8), anchor="w").pack(anchor="w")
+                 font=(FONT_UI, fs(8)), anchor="w").pack(anchor="w")
         # 右侧倒计时
         self.reset_cd_var = tk.StringVar(value="-- : -- : --")
         tk.Label(wrap, textvariable=self.reset_cd_var, bg=BG_BAR_TRACK,
-                 fg=ACCENT, font=(FONT_MONO, 16, "bold"),
+                 fg=ACCENT, font=(FONT_MONO, fs(16), "bold"),
                  padx=14).pack(side=RIGHT)
 
     def _make_row(self, parent, label_text, is_token=True):
@@ -512,16 +525,16 @@ class FloatingBar(tk.Toplevel):
         right = tk.Frame(row, bg=BG)
         right.pack(side=LEFT, fill=BOTH, expand=True)
         tk.Label(right, text=label_text, bg=BG, fg=FG_DIM,
-                 font=(FONT_MONO, 8)).pack(anchor="w")
+                 font=(FONT_MONO, fs(8))).pack(anchor="w")
         pct_var = tk.StringVar(value="0%")
         self._pct_labels = getattr(self, "_pct_labels", {})
         pct_lbl = tk.Label(right, textvariable=pct_var, bg=BG, fg=FG,
-                           font=(FONT_UI_SEMI, 13, "bold"))
+                           font=(FONT_UI_SEMI, fs(13), "bold"))
         pct_lbl.pack(anchor="w")
         # 副文本（用量明细 / 重置钟点）
         sub_var = tk.StringVar(value="　")
         tk.Label(right, textvariable=sub_var, bg=BG, fg=FG_DIM,
-                 font=(FONT_MONO, 8), anchor="w", justify=LEFT
+                 font=(FONT_MONO, fs(8)), anchor="w", justify=LEFT
                  ).pack(anchor="w", pady=(2, 0))
 
         return {"pct": pct_var, "pct_lbl": pct_lbl, "sub": sub_var,
@@ -582,7 +595,7 @@ class FloatingBar(tk.Toplevel):
         """悬浮窗右键菜单：没有系统托盘时也能操作。"""
         m = tk.Menu(self, tearoff=0, bg=BG_CARD, fg=FG,
                     activebackground=HOVER, activeforeground=FG,
-                    borderwidth=0, font=(FONT_UI, 10))
+                    borderwidth=0, font=(FONT_UI, fs(10)))
         shown = self.winfo_viewable()
         m.add_command(label="隐藏悬浮条" if shown else "显示悬浮条",
                       command=lambda: self.app.toggle_floating())
@@ -715,9 +728,9 @@ class FloatingBar(tk.Toplevel):
                     cx = size / 2
                     canvas.create_text(cx, cx - 3,
                                        text=f"{pct:.0f}", fill=FG,
-                                       font=(FONT_UI_SEMI, max(12, size // 4), "bold"))
+                                       font=(FONT_UI_SEMI, fs(max(12, size // 4)), "bold"))
                     canvas.create_text(cx, cx + size // 5, text="%",
-                                       fill=FG_DIM, font=(FONT_MONO, max(7, size // 10)))
+                                       fill=FG_DIM, font=(FONT_MONO, fs(max(7, size // 10))))
                 # 百分比文字也跟着闪
                 row["pct_lbl"].config(fg=color)
             self._warning_phase = not self._warning_phase
@@ -989,57 +1002,57 @@ class SettingsDialog(tk.Toplevel):
         f.pack(fill=BOTH, expand=True)
 
         tk.Label(f, text="GLM 额度助手 · 设置", bg=BG, fg=FG,
-                 font=(FONT_UI, 13, "bold")).grid(row=0, column=0, columnspan=2, pady=(20, 12), sticky="w", padx=20)
+                 font=(FONT_UI, fs(13), "bold")).grid(row=0, column=0, columnspan=2, pady=(20, 12), sticky="w", padx=20)
 
         # 平台
-        tk.Label(f, text="站点", bg=BG, fg=FG_DIM, font=(FONT_UI, 9)).grid(row=1, column=0, sticky="w", **pad)
+        tk.Label(f, text="站点", bg=BG, fg=FG_DIM, font=(FONT_UI, fs(9))).grid(row=1, column=0, sticky="w", **pad)
         pf = tk.Frame(f, bg=BG)
         pf.grid(row=1, column=1, sticky="w")
         self.plat_var = tk.StringVar(value=self.cfg.platform)
         tk.Radiobutton(pf, text="智谱 AI（国内站）", variable=self.plat_var, value="zhipu",
                        bg=BG, fg=FG, selectcolor=BG_CARD, activebackground=BG,
-                       font=(FONT_UI, 9), command=self._on_plat).pack(side=LEFT)
+                       font=(FONT_UI, fs(9)), command=self._on_plat).pack(side=LEFT)
         tk.Radiobutton(pf, text="Z.ai（国际站）", variable=self.plat_var, value="zai",
                        bg=BG, fg=FG, selectcolor=BG_CARD, activebackground=BG,
-                       font=(FONT_UI, 9), command=self._on_plat).pack(side=LEFT, padx=(10, 0))
+                       font=(FONT_UI, fs(9)), command=self._on_plat).pack(side=LEFT, padx=(10, 0))
 
         # Base URL
-        tk.Label(f, text="Base URL", bg=BG, fg=FG_DIM, font=(FONT_UI, 9)).grid(row=2, column=0, sticky="w", **pad)
+        tk.Label(f, text="Base URL", bg=BG, fg=FG_DIM, font=(FONT_UI, fs(9))).grid(row=2, column=0, sticky="w", **pad)
         self.url_var = tk.StringVar(value=self.cfg.base_url)
         tk.Entry(f, textvariable=self.url_var, width=34, bg=BG_CARD, fg=FG,
-                 insertbackground=FG, relief=FLAT, font=(FONT_UI, 9)).grid(row=2, column=1, sticky="w", pady=8)
+                 insertbackground=FG, relief=FLAT, font=(FONT_UI, fs(9))).grid(row=2, column=1, sticky="w", pady=8)
 
         # API Key
-        tk.Label(f, text="API Key", bg=BG, fg=FG_DIM, font=(FONT_UI, 9)).grid(row=3, column=0, sticky="w", **pad)
+        tk.Label(f, text="API Key", bg=BG, fg=FG_DIM, font=(FONT_UI, fs(9))).grid(row=3, column=0, sticky="w", **pad)
         kf = tk.Frame(f, bg=BG)
         kf.grid(row=3, column=1, sticky="w")
         self.key_var = tk.StringVar(value=self.cfg.api_key)
         self.key_entry = tk.Entry(kf, textvariable=self.key_var, width=28, bg=BG_CARD, fg=FG,
-                                  insertbackground=FG, relief=FLAT, show="●", font=(FONT_UI, 9))
+                                  insertbackground=FG, relief=FLAT, show="●", font=(FONT_UI, fs(9)))
         self.key_entry.pack(side=LEFT)
         self.show_var = tk.BooleanVar(value=False)
         tk.Checkbutton(kf, text="显示", variable=self.show_var, command=self._toggle_key,
                        bg=BG, fg=FG_DIM, selectcolor=BG_CARD, activebackground=BG,
-                       font=(FONT_UI, 8)).pack(side=LEFT, padx=(6, 0))
+                       font=(FONT_UI, fs(8))).pack(side=LEFT, padx=(6, 0))
 
         # 刷新间隔
-        tk.Label(f, text="刷新间隔", bg=BG, fg=FG_DIM, font=(FONT_UI, 9)).grid(row=4, column=0, sticky="w", **pad)
+        tk.Label(f, text="刷新间隔", bg=BG, fg=FG_DIM, font=(FONT_UI, fs(9))).grid(row=4, column=0, sticky="w", **pad)
         iv = tk.Frame(f, bg=BG)
         iv.grid(row=4, column=1, sticky="w")
         self.int_var = tk.IntVar(value=self.cfg.interval_min)
         tk.Spinbox(iv, from_=1, to=1440, textvariable=self.int_var, width=6, bg=BG_CARD, fg=FG,
-                   insertbackground=FG, relief=FLAT, font=(FONT_UI, 9)).pack(side=LEFT)
-        tk.Label(iv, text=" 分钟", bg=BG, fg=FG_DIM, font=(FONT_UI, 9)).pack(side=LEFT)
+                   insertbackground=FG, relief=FLAT, font=(FONT_UI, fs(9))).pack(side=LEFT)
+        tk.Label(iv, text=" 分钟", bg=BG, fg=FG_DIM, font=(FONT_UI, fs(9))).pack(side=LEFT)
 
         # 主题（极简 / 科幻 / 温暖）—— 重启后生效
-        tk.Label(f, text="主题", bg=BG, fg=FG_DIM, font=(FONT_UI, 9)).grid(row=5, column=0, sticky="w", **pad)
+        tk.Label(f, text="主题", bg=BG, fg=FG_DIM, font=(FONT_UI, fs(9))).grid(row=5, column=0, sticky="w", **pad)
         tf = tk.Frame(f, bg=BG)
         tf.grid(row=5, column=1, sticky="w")
         self.theme_var = tk.StringVar(value=self.cfg.theme)
         for val, txt in [("minimal", "极简"), ("scifi", "科幻"), ("cozy", "温暖")]:
             tk.Radiobutton(tf, text=txt, variable=self.theme_var, value=val,
                            bg=BG, fg=FG, selectcolor=BG_CARD, activebackground=BG,
-                           font=(FONT_UI, 9)).pack(side=LEFT, padx=(0, 10))
+                           font=(FONT_UI, fs(9))).pack(side=LEFT, padx=(0, 10))
 
         # 按钮（用 Label 模拟：macOS 原生 Button 不吃背景色，会显示成
         # 系统默认白色，白字白底完全看不清。Label 在所有平台都受 bg/fg 控制）
@@ -1053,7 +1066,7 @@ class SettingsDialog(tk.Toplevel):
         bg = ACCENT if primary else BG_CARD
         fg = "white" if primary else FG
         btn = tk.Label(parent, text=text, bg=bg, fg=fg,
-                       font=(FONT_UI, 10, "bold" if primary else "normal"),
+                       font=(FONT_UI, fs(10), "bold" if primary else "normal"),
                        padx=20 if primary else 16, pady=6, cursor="hand2")
         btn.bind("<Button-1>", lambda e: command())
         # 悬停效果
