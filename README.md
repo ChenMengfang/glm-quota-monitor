@@ -8,6 +8,7 @@
 [![Platform: Windows · macOS · Linux](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-blue.svg)]()
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)]()
 [![Version: v2.0](https://img.shields.io/badge/Version-v2.0-orange.svg)]()
+[![Build Windows EXE](https://github.com/ChenMengfang/glm-quota-monitor/actions/workflows/build-windows.yml/badge.svg)](https://github.com/ChenMengfang/glm-quota-monitor/actions/workflows/build-windows.yml)
 
 </div>
 
@@ -28,7 +29,7 @@
 
 让你在用 Claude Code / Cursor / ZCode 调 GLM 时，对额度消耗一目了然。
 
-> **v2.0 重大更新**：从 Windows 独占升级为 **Windows / macOS / Linux 跨平台**，UI 重构为**环形进度表盘 + 三套主题（科幻/极简/温暖）+ 分级警示动画**，新增 macOS `.app` 原生应用包。
+> **v2.0 重大更新**：从 Windows 独占升级为 **Windows / macOS / Linux 跨平台**，UI 重构为**环形进度表盘 + 三套主题（科幻/极简/温暖）+ 分级警示动画**，双平台安装包均已在 [Releases](../../releases) 提供，Windows 版由 GitHub Actions 云端自动构建。
 
 ---
 
@@ -95,10 +96,17 @@
 
 ### 方式一：下载安装包（推荐）
 
-**Windows**：前往 [Releases](../../releases) 下载 `GLMQuotaMonitor.exe`，双击运行。
+| 平台 | 文件 | 说明 |
+|------|------|------|
+| 🪟 **Windows** | `GLM额度助手-Windows.exe` | 双击运行，无需装 Python。[GitHub Actions 自动构建] |
+| 🍎 **macOS** | `GLM额度助手-macOS-v2.0.zip` | 解压后拖入「应用程序」 |
+| 🐧 **Linux** | 源码运行 | `pip install -r requirements.txt && python app.py` |
 
-**macOS**：前往 [Releases](../../releases) 下载 `GLM额度助手.app`，拖进「应用程序」即可。
-> 首次打开若提示"无法验证开发者"：右键 `.app` →「打开」→ 弹窗点「打开」放行一次。
+前往 [Releases](../../releases) 下载对应平台的安装包。
+
+> **macOS 首次打开**若提示"无法验证开发者"：右键 `.app` →「打开」→ 弹窗点「打开」放行一次。
+>
+> **Windows** 若被杀毒软件误报（PyInstaller 打包的常见现象）：加入白名单信任，或改用源码运行。
 
 ### 方式二：从源码运行
 
@@ -181,6 +189,10 @@ pip install -r requirements.txt
 
 ### Windows（生成 exe）
 
+**推荐：用 GitHub Actions 自动构建**——推送 `v*` tag 时会自动在云端 Windows 环境打包 exe 并上传到对应 Release（见仓库 `.github/workflows/build-windows.yml`）。也可在 Actions 页面手动触发。
+
+**本地打包**（需 Windows 机器）：
+
 ```cmd
 pip install -r requirements.txt
 build.bat
@@ -197,7 +209,9 @@ glm-quota-monitor/
 ├── quota.py            # 额度查询逻辑
 ├── build.sh            # macOS 打包脚本
 ├── build.bat           # Windows 打包脚本
+├── .github/workflows/  # GitHub Actions：自动构建 Windows exe
 ├── app_icon.icns       # macOS 应用图标
+├── app_icon.ico        # Windows 应用图标（多尺寸）
 ├── app_icon.png        # 通用图标
 ├── requirements.txt    # Python 依赖
 ├── LICENSE
